@@ -1,0 +1,103 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+# -*- coding: binary -*-
+
+# Author: https://twitter.com/GuerrillaWF
+
+# Native imports
+import re
+import os
+import sys
+import json
+import time
+import string
+import getopt
+import threading
+from libs.paint import colors
+from libs.storage import database
+from libs.twitter import operations
+from libs.functions import utilities
+from core.info import Help, notifications
+
+
+
+def collectthefollowing(arg):
+    CollectFollowing = operations.CollectFollowing(arg)
+    database.WriteHandleFollowingToFile(arg, CollectFollowing)
+
+def collectfollowers(arg):
+    CollectedFollowers = operations.CollectFollowers(arg)
+    database.WriteHandleFollowersToFile(arg, CollectedFollowers)
+
+def convertnametoid(NAME):
+    id_response = operations.GetTwitterIDFromHandle(NAME)
+    # Quick and dirty conditional cases, to print the correct output.
+    output = colors.C+NAME+colors.N
+
+    if id_response is None:
+        utilities.pi(notifications.FAIL + output + " not found.")
+    else:
+        utilities.pi(notifications.INFO + output + " is " + str(id_response))
+
+def convertidtoname(ID):
+    handle_response = operations.GetTwitterHandleFromID(ID)
+    # Quick and dirty conditional cases, to print the correct output.
+    output = colors.C+ID+colors.N
+
+    if handle_response is None:
+        utilities.pi(notifications.FAIL + output + " not found.")
+    else:
+        utilities.pi(notifications.INFO + output + " is " + str(operations.GetTwitterHandleFromID(ID)))
+
+def main(IFNOARG):
+
+    try:
+
+        options, arguements = getopt.getopt(sys.argv[1:], 'h i: n: e: v:', ['followers=','following=','tweets='])
+
+        for opt, arg in options:
+
+            if opt in '-h':
+                Help()
+
+            # Store the current followers of a given twitter handle in the followers database.
+            if opt in '--followers':
+                collectfollowers(arg)
+
+            # Store the current followers of a given twitter handle in the followers database.
+            if opt in '--following':
+                collectthefollowing(arg)
+
+            # Get a basic profile of an account.
+            if opt in '-e':
+                operations.GrabEntireProfile(arg)
+
+            if opt in '--tweets':
+                print " "
+                operations.CollectStatuses(arg)
+
+            # Resolve a twitter username into a Twitter user-id.
+            if opt in '-i':
+                convertidtoname(arg)
+
+            # Visualize some part of the database.
+            if opt in '-v':
+                try:
+                    database.VisualizeTweetLinks(arg)
+                except OSError:
+                    utilities.pi("{}{}'s tweets have not been recorded yet.".format(notifications.ERROR ,arg))
+                    utilities.pi("{}try './pronto.py --tweets {}' to harvest {}'s tweets.\n".format(notifications.INFO ,arg ,arg))
+                #pass # tweets | name to convert and visual tweets == html.
+
+            # Resolve a twitter id to a Twitter user-name.
+            if opt in '-n':
+                convertnametoid(arg)
+
+    except getopt.GetoptError, e:
+        Help()
+
+if __name__ == "__main__":
+    try:
+        main(sys.argv[1])
+    except IndexError:
+        Help()
