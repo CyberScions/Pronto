@@ -12,92 +12,155 @@ import json
 import time
 import string
 import getopt
-import threading
-from libs.paint import colors
-from libs.storage import database
-from libs.twitter import operations
-from libs.functions import utilities
-from core.info import Help, notifications
+from core.libs import database
+from core.libs.twitter import operations
+from core.libs.functions import Utilities
+from core.info import notifications
 
+class ProntoRuntimeError(RuntimeError):
+    pass
 
+class Pronto(object):
 
-def collectthefollowing(arg):
-    CollectFollowing = operations.CollectFollowing(arg)
-    database.WriteHandleFollowingToFile(arg, CollectFollowing)
+    def __init__(self):
+        self.verbose   = True
+        self.__options = {}
+        self.__util    = Utilities()
+        self.__notify  = notifications()
+        self.__twitter = operations()
 
-def collectfollowers(arg):
-    CollectedFollowers = operations.CollectFollowers(arg)
-    database.WriteHandleFollowersToFile(arg, CollectedFollowers)
+    def __tell(self, text, sep=' ', end='\n', stream=sys.stdout, flush=False):
+        if self.verbose or stream != sys.stdout:
+            stream.write(text)
+            if end is not None:
+                stream.write(end)
+            else:
+                if sep is not None:
+                    stream.write(sep)
+            if flush or end is None:
+                stream.flush()
 
-def convertnametoid(NAME):
-    id_response = operations.GetTwitterIDFromHandle(NAME)
-    # Quick and dirty conditional cases, to print the correct output.
-    output = colors.C+NAME+colors.N
+    def boot(self):
+        args, commands = getopt.getopt(sys.argv[1:], 'u:')
+        args = dict(args)
 
-    if id_response is None:
-        utilities.pi(notifications.FAIL + output + " not found.")
-    else:
-        utilities.pi(notifications.INFO + output + " is " + str(id_response))
+        if len(commands) == 1 and commands[0] in self.commands:
+            command = commands[0]
+        else:
+            # if no args or options exist, show the help.
+            command = 'help'
+            args = {}
+        # if everything checks out. Run the desired command with the desired option(s)
+        func = self.commands[command]
 
-def convertidtoname(ID):
-    handle_response = operations.GetTwitterHandleFromID(ID)
-    # Quick and dirty conditional cases, to print the correct output.
-    output = colors.C+ID+colors.N
+        req_params, opt_params = func.cli_options
+        for param in req_params:
+            if param not in args:
+                raise ProntoRuntimeError("The command '%s' requires the " \
+                                        "option '%s'. See 'help'." % \
+                                        (command, param))
+        for arg, value in args.iteritems():
+            if arg in req_params or arg in opt_params:
 
-    if handle_response is None:
-        utilities.pi(notifications.FAIL + output + " not found.")
-    else:
-        utilities.pi(notifications.INFO + output + " is " + str(operations.GetTwitterHandleFromID(ID)))
+                if arg == '-u':
+                    self.__options['username'] = value.lower()
 
-def main(IFNOARG):
+                    # Prevent messages from corrupting stdout
+                    if value == '-':
+                        self.verbose = False
+            else:
+                raise ProntoRuntimeError("The command '%s' ignores the " \
+                                        "option '%s'." % (command, arg))
 
-    try:
+        self.__tell("\nPronto | GuerrillaWarfare - https://github.com/GuerrillaWarfare")
 
-        options, arguements = getopt.getopt(sys.argv[1:], 'h i: n: e: v:', ['followers=','following=','tweets='])
+        try:
+            func(self, **self.__options) # A wild TypeError appears from the tall grass.
+            # Will have to fix this TypeError later. Not sure what's causing this exactly.
+        except TypeError, e:
+            print e
+            #self.print_help() # For now call on the help, they always know what to do.
 
-        for opt, arg in options:
+    def print_help(self):
+        """Show this message again.
+        """
+        self.__tell('Usage Pronto [option] [command]'
+            '\n'
+            '\n Options:'
+            '\n  -u    : Define a username/handle.'
+            '\n'
+            '\n Commands:')
+        m = max([len(command) for command in self.commands])
+        for command, func in sorted(self.commands.items()):
+            self.__tell('  %s%s : %s' % (command, \
+                                        ' ' * (m - len(command)), \
+                                        func.__doc__.split('\n')[0]))
+    print_help.cli_options = ((), ())
 
-            if opt in '-h':
-                Help()
+    def __following__(self, username):
+        """Obtain a users following.
+        """
+        database.store().following2file(username, self.__twitter.CollectFollowing(username))
+    __following__.cli_options = (('-u',), ())
 
-            # Store the current followers of a given twitter handle in the followers database.
-            if opt in '--followers':
-                collectfollowers(arg)
+    def __followers__(self, username):
+        """Obtain a users followers.
+        """
+        database.store().followers2file(username, self.__twitter.CollectFollowers(username))
+    __followers__.cli_options = (('-u',), ())
 
-            # Store the current followers of a given twitter handle in the followers database.
-            if opt in '--following':
-                collectthefollowing(arg)
+    def __profile__(self, username):
+        """Get a users basic profile information.
+        """
+        self.__twitter.GetEntireProfile(username)
+    __profile__.cli_options = (('-u',), ())
 
-            # Get a basic profile of an account.
-            if opt in '-e':
-                operations.GrabEntireProfile(arg)
+    def __tweets__(self, username):
+        """Collect a users tweets.
+        """
+        self.__twitter.CollectStatuses(username)
+    __tweets__.cli_options = (('-u',), ())
 
-            if opt in '--tweets':
-                print " "
-                operations.CollectStatuses(arg)
+    def __visualize__(self, username):
+        """Visualize a handles tweets.
+        """
+        try:
+            store.VisualizeTweetLinks(username)
+        except OSError:
+            self.__util.pi("{}{}'s tweets have not been recorded yet.".format(self.__notify.ERROR , username))
+            self.__util.pi("{}try './pronto -u [username] tweets {}' to harvest {}'s tweets.\n".format(self.__notify.INFO, username, username))
+    __visualize__.cli_options = (('-u',), ())
 
-            # Resolve a twitter username into a Twitter user-id.
-            if opt in '-i':
-                convertidtoname(arg)
+    def __exhaustion__(self):
+        """Massively collect Twitter handles from hashtags/trends.
+        """
+        print "\n" + self.__notify.INFO + "Starting the mass collection engine..."
+        self.__twitter.CollectHandlesFromTrendStream()
+    __exhaustion__.cli_options = ((), ())
 
-            # Visualize some part of the database.
-            if opt in '-v':
-                try:
-                    database.VisualizeTweetLinks(arg)
-                except OSError:
-                    utilities.pi("{}{}'s tweets have not been recorded yet.".format(notifications.ERROR ,arg))
-                    utilities.pi("{}try './pronto.py --tweets {}' to harvest {}'s tweets.\n".format(notifications.INFO ,arg ,arg))
-                #pass # tweets | name to convert and visual tweets == html.
+    def documentation(self):
+        """Documentation, for those who need it.
+        """
+        print """
+./pronto -u [username] following | Get who a user is following.
+./pronto -u [username] followers | Get a users followers.
+./pronto -u [username] profile   | Get basic profile information.
+./pronto -u [username] tweets    | collect a users tweets. (in the next version)
+./pronto exhaustion              | Massively collect users from hashtags/trends.
+        """
+    documentation.cli_options = ((), ())
 
-            # Resolve a twitter id to a Twitter user-name.
-            if opt in '-n':
-                convertnametoid(arg)
-
-    except getopt.GetoptError, e:
-        Help()
+    commands = {
+    'help':print_help,
+    'following':__following__,
+    'followers':__followers__,
+    'profile':__profile__,
+    'exhaustion':__exhaustion__,
+    'docs':documentation
+    }
 
 if __name__ == "__main__":
     try:
-        main(sys.argv[1])
-    except IndexError:
-        Help()
+        Pronto().boot()
+    except KeyboardInterrupt:
+        print "\nExiting Pronto ..."
